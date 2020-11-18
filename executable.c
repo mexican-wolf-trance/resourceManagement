@@ -10,21 +10,22 @@
 #include <signal.h>
 #include <time.h>
 
-#define SEC_KEY 0x1234
+#define SEC_KEY 0x1234567
 #define MSG_KEY 0x2345
 
 //Initialize the shared clock and message queue
 typedef struct Clock
 {
-        int sec;
+        long long sec;
         long long nsec;
-	pid_t shmPID;
+//	pid_t shmPID;
 } Clock;
 
 struct msgbuf
 {
         long mtype;
-        char mtext[100];
+        int mtext;
+	pid_t pid;
 } message;
 
 
@@ -67,30 +68,10 @@ int main()
 	//the random time duration expires
 	while(1)
 	{	
-		msgrcv(msgqid, &message, sizeof(message), 1, IPC_NOWAIT);
-		if (strcmp(message.mtext, "1") == 0)		
-		{
-			if (!time_flag)
-			{
-				current_time = sim_clock->sec*1000000000 + sim_clock->nsec;
-				time_flag = 1;
-			}
-			if ((current_time + duration) <= (sim_clock->sec*1000000000 + sim_clock->nsec))
-			{ 	
-				if(!sim_clock->shmPID)
-				{
-					sim_clock->shmPID = getpid();
-					strcpy(message.mtext, "1");
-					msgsnd(msgqid, &message, sizeof(message), 0);
-					break;
-				}
-				else
-				{
-					strcpy(message.mtext, "1");
-					msgsnd(msgqid, &message, sizeof(message), 0);
-				}	
-			}
-		}
+		printf("Child here %ld\n", (long) getpid());
+		sleep(2);
+		printf("Child dead %ld\n", (long) getpid());
+		break;
 	}
 }
 

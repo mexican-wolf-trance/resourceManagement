@@ -13,7 +13,7 @@
 #include <time.h>
 
 #define BUFSIZE 1024
-#define SEC_KEY 0x1234
+#define SEC_KEY 0x1234567
 #define MSG_KEY 0x2345
 
 //Initialize the message and clock structs!
@@ -26,41 +26,45 @@ struct msgbuf
 
 typedef struct Clock
 {
-	int sec;
+	long long sec;
 	long long nsec;
 //	pid_t shmPID;
 } Clock;
 
 //I intitalize the ids and the clock pointer here so my signal handler can use them
-int shmid, msgqid;
+int shmid, msgqid, randTime;
 struct Clock *sim_clock;
 struct Clock *new_proc_clock;
 
 //set next process fork time
-int newProcTime()
+void newProcTime()
 {
-	new_proc_clock->nsec = sim_clock->nsec + (rand() % 500) * 100000;
+	randTime = (rand() % 500) * 1000000;
+	new_proc_clock->nsec = sim_clock->nsec + randTime;
 	new_proc_clock->sec = sim_clock->sec;
 }
 //check if time for a new process to begin
 int checkProcTime()
 {
-	if((new_proc_clock->nsec + new_proc_clock-sec * 1000000000) >= (sim_cloc->nsec + sim_clock->sec * 1000000000))
+	if((new_proc_clock->nsec + new_proc_clock->sec * 1000000000) <= (sim_clock->nsec + sim_clock->sec * 1000000000))
 	{
 		newProcTime();
 		return 1;
 	}
+	return 0;
 }
 
 //The signal handler! Couldn't figure out how to close the file stream before getting signal though
 void sigint(int sig)
 {
-	printf("\nTime ended: %d seconds, %lli nanoseconds\n", sim_clock->sec, sim_clock->nsec);
+//	printf("\nTime ended: %d seconds, %lli nanoseconds\n", sim_clock->sec, sim_clock->nsec);
 	if (msgctl(msgqid, IPC_RMID, 0) < 0)
 	{
 		perror("msgctl");
 		exit(0);
 	}
+        if (msgctl(msgqid, IPC_RMID, NULL) == -1)
+                fprintf(stderr, "Message queue could not be deleted\n");
 
         shmdt(sim_clock);
         shmctl(shmid, IPC_RMID, NULL);
@@ -78,13 +82,35 @@ int main (int argc, char **argv)
 	//The CTRL C catch
 	signal(SIGINT, sigint);
 
-	int option, max_child = 17, max_time = 20, counter = 0, tot_proc = 0, vOpt;;
+	int option, max_child = 17, max_time = 20, counter = 0, tot_proc = 0, vOpt = 0;
 	char file[32], *exec[] = {"./user", NULL};
 	pid_t child = 0;
 	FILE *fp;
+	//Getopt is great!
+        while ((option = getopt(argc, argv, "hv")) != -1)
+        switch (option)
+        {
+                case 'h':
+                        printf("This is the operating system simulator!\n");
+                        printf("Usage: ./oss\n");
+                        printf("For a more verbose output file, add the -v option\n");
+                        printf("Enjoy!\n");
+                        return 0;
+                case 'v':
+                        vOpt = 1;
+                        break;
+                case '?':
+                        printf("%c is not an option. Use -h for usage details\n", optopt);
+                        return 0;
+        }
+        if (argc > 2)
+        {
+                printf("Invalid usage! Check the readme\nUsage: ./oss\n");
+                printf("Use the -v option for a more verbose log file");
+                return 0;
+        }
 
 	srand(time(NULL) + getpid());
-	
 	//Get my shared memory and message queue keys
 	shmid = shmget(SEC_KEY, sizeof(Clock), 0644 | IPC_CREAT);
 	if (shmid == -1)
@@ -110,31 +136,6 @@ int main (int argc, char **argv)
         }
 
 //	sim_clock->shmPID = 0;
-	//Parse the argmuents!
-	if (argc > 2)
-	{
-		printf("Invalid usage! Check the readme\nUsage: ./oss\n");
-		printf("Use the -v option for a more verbose log file") 
-		return 0;
-	}
-	
-	//Getopt is great!
-	while ((option = getopt(argc, argv, "hv")) != -1)
-	switch (option)
-	{
-		case 'h':
-			printf("This is the operating system simulator!\n");
-			printf("Usage: ./oss\n");
-			printf("For a more verbose output file, add the -v option\n");
-			printf("Enjoy!\n");
-			return 0;
-		case 'v':
-			vOpt = 1;
-			break;
-		case '?':
-			printf("%c is not an option. Use -h for usage details\n", optopt);
-			return 0;
-	}
 	//Begin the message queue by putting a message in it
 //	message.mtype = 1;
 //	strcpy(message.mtext,"1");
@@ -147,10 +148,20 @@ int main (int argc, char **argv)
 	//Open the log file
 	if ((fp = fopen("log.out", "w")) == 0)
 	{
-               perror("log.out");
-               sigint(0);
+		perror("log.out");
+		sigint(0);
         }
-	
+	sim_clock->sec = 0;
+	sim_clock->nsec = 0;
+
+	if((new_proc_clock = malloc(sizeof(Clock))) == NULL)
+	{
+        	perror("malloc failed");
+        	return 0;
+	}
+
+	newProcTime();
+
 	//Now we start the main show
 	while(1)
 	{
@@ -168,7 +179,7 @@ int main (int argc, char **argv)
                                 sigint(0);
                         }
                         counter++;
-			totalProc++;
+			tot_proc++;
 		}
 //		msgrcv(msgqid, &message, sizeof(message), 1, IPC_NOWAIT);
                 if (sim_clock->nsec >= 1000000000)
@@ -176,8 +187,12 @@ int main (int argc, char **argv)
 	                sim_clock->sec++;
 	                sim_clock->nsec = 0;
                 }
-                sim_clock->nsec += 1000;
+                sim_clock->nsec += 100;
+		if(tot_proc == max_child)
+			break;
 	}
+	if(child > 0)
+		while(wait(NULL) > 0);
 
         if (msgctl(msgqid, IPC_RMID, 0) < 0)
         {
@@ -186,6 +201,9 @@ int main (int argc, char **argv)
         }
 	shmdt(sim_clock);
 	shmctl(shmid, IPC_RMID, NULL);
+
+        if (msgctl(msgqid, IPC_RMID, NULL) == -1)
+                fprintf(stderr, "Message queue could not be deleted\n");
 
 	kill(0, SIGQUIT);
 }

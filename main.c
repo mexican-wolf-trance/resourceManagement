@@ -32,15 +32,14 @@ typedef struct Clock
 } Clock;
 
 //I intitalize the ids and the clock pointer here so my signal handler can use them
-int shmid, msgqid, randTime;
+int shmid, msgqid;
 struct Clock *sim_clock;
 struct Clock *new_proc_clock;
 
 //set next process fork time
 void newProcTime()
 {
-	randTime = (rand() % 500) * 1000000;
-	new_proc_clock->nsec = sim_clock->nsec + randTime;
+	new_proc_clock->nsec = sim_clock->nsec + ((rand() % 500) * 1000000);
 	new_proc_clock->sec = sim_clock->sec;
 }
 //check if time for a new process to begin
@@ -58,18 +57,15 @@ int checkProcTime()
 void sigint(int sig)
 {
 //	printf("\nTime ended: %d seconds, %lli nanoseconds\n", sim_clock->sec, sim_clock->nsec);
-	if (msgctl(msgqid, IPC_RMID, 0) < 0)
-	{
-		perror("msgctl");
-		exit(0);
-	}
         if (msgctl(msgqid, IPC_RMID, NULL) == -1)
                 fprintf(stderr, "Message queue could not be deleted\n");
 
         shmdt(sim_clock);
         shmctl(shmid, IPC_RMID, NULL);
-
-	write(1, "Interrupt!\n", 12);
+	if(sig == SIGALRM)
+		write(1, "\nAlarm! Alarm!\n", 15);
+	else
+		write(1, "\nCTRL C was hit!\n", 17);
 	write(1, "Now killing the kiddos\n", 23);
 	kill(0, SIGQUIT);
 	exit(0);
@@ -137,9 +133,9 @@ int main (int argc, char **argv)
 
 //	sim_clock->shmPID = 0;
 	//Begin the message queue by putting a message in it
-//	message.mtype = 1;
-//	strcpy(message.mtext,"1");
-//	msgsnd(msgqid, &message, sizeof(message), 0);	
+	message.mtype = 1;
+	message.mtext = 1;
+	msgsnd(msgqid, &message, sizeof(message), 0);	
 	
 	//Begin the alarm. Goes off after the -t amount of time expires
 	alarm(max_time);
@@ -180,26 +176,46 @@ int main (int argc, char **argv)
                                 sigint(0);
                         }
                         counter++;
-			tot_proc++;
+			tot_proc++;		
 		}
-//		msgrcv(msgqid, &message, sizeof(message), 1, IPC_NOWAIT);
+		if(msgrcv(msgqid, &message, sizeof(message), 2, IPC_NOWAIT) > 0)
+		{
+			printf("OSS acknowledges child %ld has died\n", (long) message.pid);
+			message.mtype = 1;
+                        message.mtext = 1;
+                        msgsnd(msgqid, &message, sizeof(message), 0);
+			wait(NULL);	
+			counter--;
+		}
+                if(msgrcv(msgqid, &message, sizeof(message), 3, IPC_NOWAIT) > 0)
+                {
+                        printf("OSS acknowledges child %ld is asking for resources\n", (long) message.pid);
+                        message.mtype = 1;
+                        message.mtext = 1;
+                        msgsnd(msgqid, &message, sizeof(message), 0);
+                }
+                if(msgrcv(msgqid, &message, sizeof(message), 4, IPC_NOWAIT) > 0)
+                {
+                        printf("OSS acknowledges child %ld is releasing resources\n", (long) message.pid);
+                        message.mtype = 1;
+                        message.mtext = 1;
+                        msgsnd(msgqid, &message, sizeof(message), 0);
+                }
+
                 if (sim_clock->nsec >= 1000000000)
                 {
 	                sim_clock->sec++;
 	                sim_clock->nsec = 0;
                 }
                 sim_clock->nsec += 1000;
-		if(tot_proc == max_child)
+		if(tot_proc == 100)
 			break;
 	}
-	if(child > 0)
-		while(wait(NULL) > 0);
+//	if(child > 0)
+//		while(wait(NULL) > 0);
 
-        if (msgctl(msgqid, IPC_RMID, 0) < 0)
-        {
-                perror("msgctl");
-                return 1;
-        }
+	printf("Main finished!\n");
+
 	shmdt(sim_clock);
 	shmctl(shmid, IPC_RMID, NULL);
 

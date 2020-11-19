@@ -31,8 +31,8 @@ struct msgbuf
 
 int main()
 {
-	int shmid, msgqid, time_flag = 0;
-	long long duration = 0, current_time = 0;
+	int shmid, msgqid, decision, decision_flag = 0;
+//	long long current_time = 0;
 	struct Clock *sim_clock;
 	time_t t;
 	
@@ -67,19 +67,47 @@ int main()
 	//the random time duration expires
 	while(1)
 	{	
-		if(!time_flag)
+		if(!decision_flag)
 		{
-			duration = (rand() % 50000000);
-			current_time = sim_clock->sec*1000000000 + sim_clock->nsec;
-			time_flag = 1;
+			decision = (rand() % 100);
+			printf("Child %ld's decision is %d\n", (long) getpid(), decision);
+			decision_flag = 1;
 		}
-		if(current_time + duration <= sim_clock->nsec + sim_clock->sec*1000000000)
+		if(decision < 2)
 		{
-			printf("Child dead %ld\n", (long) getpid());
-			break;
-		}		
-		printf("Child here %ld\n", (long) getpid());
-		sleep(2);
+			if(msgrcv(msgqid, &message, sizeof(message), 1, IPC_NOWAIT) > 0)
+			{
+				printf("Child dead %ld\n", (long) getpid());
+				message.mtype = 2;
+				message.pid = getpid();
+				msgsnd(msgqid, &message, sizeof(message), 0);
+				exit(0);
+			}
+		}
+		if(decision > 2 && decision <= 50)
+		{
+			if(msgrcv(msgqid, &message, sizeof(message), 1, IPC_NOWAIT) > 0)
+			{
+				printf("I am asking for resources!\n");
+                                message.mtype = 3;
+                                message.pid = getpid();
+                                msgsnd(msgqid, &message, sizeof(message), 0);
+				decision_flag = 0;
+			}
+		}
+                if(decision > 50 && decision <= 100)
+                {
+                        if(msgrcv(msgqid, &message, sizeof(message), 1, IPC_NOWAIT) > 0)
+                        {
+                                printf("I am releasing resources!\n");
+                                message.mtype = 4;
+                                message.pid = getpid();
+                                msgsnd(msgqid, &message, sizeof(message), 0);
+				decision_flag = 0;
+                        }
+                }	
+//		printf("Child here %ld\n", (long) getpid());
+//		sleep(1);
 	}
 }
 

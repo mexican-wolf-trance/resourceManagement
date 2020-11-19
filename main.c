@@ -26,8 +26,8 @@ struct msgbuf
 
 typedef struct Clock
 {
-	long long sec;
-	long long nsec;
+	unsigned int sec;
+	unsigned int nsec;
 //	pid_t shmPID;
 } Clock;
 
@@ -151,6 +151,7 @@ int main (int argc, char **argv)
 		perror("log.out");
 		sigint(0);
         }
+	//Start the clock!
 	sim_clock->sec = 0;
 	sim_clock->nsec = 0;
 
@@ -187,7 +188,7 @@ int main (int argc, char **argv)
 	                sim_clock->sec++;
 	                sim_clock->nsec = 0;
                 }
-                sim_clock->nsec += 100;
+                sim_clock->nsec += 1000;
 		if(tot_proc == max_child)
 			break;
 	}

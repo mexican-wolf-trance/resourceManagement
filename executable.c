@@ -16,8 +16,8 @@
 //Initialize the shared clock and message queue
 typedef struct Clock
 {
-        long long sec;
-        long long nsec;
+        unsigned int sec;
+        unsigned int nsec;
 //	pid_t shmPID;
 } Clock;
 
@@ -61,17 +61,25 @@ int main()
         }
 
 	//Seed the random number generator and grab a number between 0 and 50,000,000)
-	srand((int)time(&t) % getpid());
-	duration = (rand() % 50000000);	
+	srand((int)time(&t) % getpid());	
 	
 	//The main show: Check the queue, get in the critical section, and check the clock until
 	//the random time duration expires
 	while(1)
 	{	
+		if(!time_flag)
+		{
+			duration = (rand() % 50000000);
+			current_time = sim_clock->sec*1000000000 + sim_clock->nsec;
+			time_flag = 1;
+		}
+		if(current_time + duration <= sim_clock->nsec + sim_clock->sec*1000000000)
+		{
+			printf("Child dead %ld\n", (long) getpid());
+			break;
+		}		
 		printf("Child here %ld\n", (long) getpid());
 		sleep(2);
-		printf("Child dead %ld\n", (long) getpid());
-		break;
 	}
 }
 

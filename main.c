@@ -31,15 +31,43 @@ typedef struct Clock
 //	pid_t shmPID;
 } Clock;
 
+typedef struct 
+{
+	int usedResources[20];
+} Resources;
+
+typedef struct PCB
+{
+	pid_t pid;
+	unsigned int totalBlockedTime;
+	unsigned int blockedBurstTime;
+	int resourceRequest;
+	Resources *used;
+} PCB;
+
+typedef struct queue
+{
+	struct queue *next;
+	struct pcb *head;
+} Queue;
+
 //I intitalize the ids and the clock pointer here so my signal handler can use them
 int shmid, msgqid;
 struct Clock *sim_clock;
 struct Clock *new_proc_clock;
 
+
+Resources *totalResources;
+Resources *availableResources;
+Resources *allocatedResources;
+
+Queue *blockedQueue;
+Queue *processList;
+
 //set next process fork time
 void newProcTime()
 {
-	new_proc_clock->nsec = sim_clock->nsec + ((rand() % 500) * 1000000);
+	new_proc_clock->nsec = sim_clock->nsec + ((rand() % 500) * 100000);
 	new_proc_clock->sec = sim_clock->sec;
 }
 //check if time for a new process to begin
@@ -68,7 +96,6 @@ void sigint(int sig)
 		write(1, "\nCTRL C was hit!\n", 17);
 	write(1, "Now killing the kiddos\n", 23);
 	kill(0, SIGQUIT);
-	exit(0);
 }
 
 
@@ -78,7 +105,7 @@ int main (int argc, char **argv)
 	//The CTRL C catch
 	signal(SIGINT, sigint);
 
-	int option, max_child = 17, max_time = 20, counter = 0, tot_proc = 0, vOpt = 0;
+	int option, max_child = 18, max_time = 20, counter = 0, tot_proc = 0, vOpt = 0;
 	char file[32], *exec[] = {"./user", NULL};
 	pid_t child = 0;
 	FILE *fp;
@@ -133,9 +160,9 @@ int main (int argc, char **argv)
 
 //	sim_clock->shmPID = 0;
 	//Begin the message queue by putting a message in it
-	message.mtype = 1;
-	message.mtext = 1;
-	msgsnd(msgqid, &message, sizeof(message), 0);	
+//	message.mtype = 1;
+//	message.mtext = 1;
+//	msgsnd(msgqid, &message, sizeof(message), 0);	
 	
 	//Begin the alarm. Goes off after the -t amount of time expires
 	alarm(max_time);
@@ -162,7 +189,7 @@ int main (int argc, char **argv)
 	//Now we start the main show
 	while(1)
 	{
-		if(counter <= max_child && checkProcTime())
+		if(counter < max_child && checkProcTime())
 		{
                         if ((child = fork()) == 0)
                         {
@@ -175,29 +202,29 @@ int main (int argc, char **argv)
                                 perror("Failed to fork");
                                 sigint(0);
                         }
-                        counter++;
-			tot_proc++;		
+                        counter++;		
 		}
 		if(msgrcv(msgqid, &message, sizeof(message), 2, IPC_NOWAIT) > 0)
 		{
 			printf("OSS acknowledges child %ld has died\n", (long) message.pid);
-			message.mtype = 1;
-                        message.mtext = 1;
-                        msgsnd(msgqid, &message, sizeof(message), 0);
+//			message.mtype = 1;
+//                       message.mtext = 1;
+//                      msgsnd(msgqid, &message, sizeof(message), 0);
 			wait(NULL);	
 			counter--;
+			tot_proc++;
 		}
                 if(msgrcv(msgqid, &message, sizeof(message), 3, IPC_NOWAIT) > 0)
                 {
                         printf("OSS acknowledges child %ld is asking for resources\n", (long) message.pid);
-                        message.mtype = 1;
+                        message.mtype = message.pid;
                         message.mtext = 1;
                         msgsnd(msgqid, &message, sizeof(message), 0);
                 }
                 if(msgrcv(msgqid, &message, sizeof(message), 4, IPC_NOWAIT) > 0)
                 {
                         printf("OSS acknowledges child %ld is releasing resources\n", (long) message.pid);
-                        message.mtype = 1;
+                        message.mtype = message.pid;
                         message.mtext = 1;
                         msgsnd(msgqid, &message, sizeof(message), 0);
                 }
@@ -208,7 +235,7 @@ int main (int argc, char **argv)
 	                sim_clock->nsec = 0;
                 }
                 sim_clock->nsec += 1000;
-		if(tot_proc == 100)
+		if(tot_proc == 30)
 			break;
 	}
 //	if(child > 0)

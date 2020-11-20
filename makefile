@@ -15,5 +15,5 @@ executable.o: executable.c
 	$(CC) $(CFLAGS) -c executable.c
 
 clean:
-	/bin/rm -f *.o  $(TARGET) $(TARGET2)
+	/bin/rm -f *.o  $(TARGET) $(TARGET2) log.out
 

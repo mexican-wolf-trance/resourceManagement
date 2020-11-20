@@ -35,7 +35,7 @@ typedef struct Resources
 
 int main()
 {
-	int i, shmid, msgqid, resid, duration, decision, decision_flag = 0, resChoice;
+	int i, shmid, msgqid, resid, duration, decision, decision_flag = 0, resChoice, requested[20];
 	long long current_time = 0;
 	struct Clock *sim_clock;
 	struct Resources *totalResources, *allocatedRes;
@@ -86,17 +86,25 @@ int main()
 
 	pid = getpid();	
 	//Seed the random number generator and grab a number between 0 and 50,000,000)
-	srand((int)time(&t) % getpid());	
+	srand((int)time(&t) % pid);
+	
+	printf("Child %ld resquests:\n", (long) pid);
+	for(i = 0; i < 20; i++)
+	{
+		requested[i] = (rand() % totalResources->usedResources[i]);
+		printf("%d: %d ", i, requested[i]);
+	}
+	printf("\n");
 	
 	//The main show
-	printf("Child %ld is created\n", (long) pid);
+//	printf("Child %ld is created\n", (long) pid);
 	while(1)
 	{
 		if(!decision_flag)
 		{
 			resChoice = (rand() % 20);
 			decision = (rand() % 100);
-			duration = (rand() % 5000000);
+			duration = (rand() % 2500000);
 			current_time = sim_clock->sec*1000000000 + sim_clock->nsec;
 			decision_flag = 1;
 		}
@@ -111,9 +119,9 @@ int main()
 			msgsnd(msgqid, &message, sizeof(message), 0);
 			exit(0);
 		}
-		if(decision > 2 && decision <= 55 && ((current_time + duration) <= (sim_clock->sec*1000000000 + sim_clock->nsec)))
+		if(decision > 2 && decision <= 70 && ((current_time + duration) <= (sim_clock->sec*1000000000 + sim_clock->nsec)))
 		{
-			if(totalResources->usedResources[resChoice] != allocatedRes->usedResources[resChoice])
+			if(requested[resChoice] != allocatedRes->usedResources[resChoice])
 			{
 				printf("Child %ld is requesting %d resource!\n", (long) pid, resChoice);
 				message.mtype = 3;
@@ -128,21 +136,26 @@ int main()
 			}
 			decision_flag = 0;
 		}
-               	if(decision > 55 && decision <= 100 && ((current_time + duration) <= (sim_clock->sec*1000000000 + sim_clock->nsec)))
-               	{	if(allocatedRes->usedResources[resChoice] > 0)
+               	if(decision > 70 && decision <= 100 && ((current_time + duration) <= (sim_clock->sec*1000000000 + sim_clock->nsec)))
+               	{	
+			while(1)
 			{
-               	        	printf("Child %ld is releasing resources!\n", (long) pid);
-               	        	message.mtype = 4;
-               	        	message.pid = pid;
-				message.mtext = resChoice;
-               	        	msgsnd(msgqid, &message, sizeof(message), 0);
-				if(msgrcv(msgqid, &message, sizeof(message), pid, 0) > 0)
+				if(allocatedRes->usedResources[resChoice] > 0)
 				{
-					allocatedRes->usedResources[resChoice]--;
-					decision_flag = 0;
+               	        		printf("Child %ld is releasing resource %d!\n", (long) pid, resChoice);
+               	        		message.mtype = 4;
+               	        		message.pid = pid;
+					message.mtext = resChoice;
+               	        		msgsnd(msgqid, &message, sizeof(message), 0);
+					if(msgrcv(msgqid, &message, sizeof(message), pid, 0) > 0)
+					{
+						allocatedRes->usedResources[resChoice] -= 1;
+						decision_flag = 0;
+						break;
+					}
 				}
+				resChoice = (rand() % 20);
 			}
-			decision_flag = 0;
                	}	
 	}
 }

@@ -15,6 +15,7 @@
 #define BUFSIZE 1024
 #define SEC_KEY 0x1234567
 #define MSG_KEY 0x2345
+#define RES_KEY 0x7654
 
 //Initialize the message and clock structs!
 struct msgbuf
@@ -31,7 +32,7 @@ typedef struct Clock
 //	pid_t shmPID;
 } Clock;
 
-typedef struct 
+typedef struct Resources
 {
 	int usedResources[20];
 } Resources;
@@ -52,7 +53,7 @@ typedef struct queue
 } Queue;
 
 //I intitalize the ids and the clock pointer here so my signal handler can use them
-int shmid, msgqid;
+int shmid, msgqid, resid;
 struct Clock *sim_clock;
 struct Clock *new_proc_clock;
 
@@ -87,7 +88,8 @@ void sigint(int sig)
 //	printf("\nTime ended: %d seconds, %lli nanoseconds\n", sim_clock->sec, sim_clock->nsec);
         if (msgctl(msgqid, IPC_RMID, NULL) == -1)
                 fprintf(stderr, "Message queue could not be deleted\n");
-
+	shmdt(totalResources);
+	shmctl(resid, IPC_RMID, NULL);
         shmdt(sim_clock);
         shmctl(shmid, IPC_RMID, NULL);
 	if(sig == SIGALRM)
@@ -105,7 +107,7 @@ int main (int argc, char **argv)
 	//The CTRL C catch
 	signal(SIGINT, sigint);
 
-	int option, max_child = 18, max_time = 20, counter = 0, tot_proc = 0, vOpt = 0;
+	int i, option, max_child = 18, max_time = 20, counter = 0, tot_proc = 0, vOpt = 0;
 	char file[32], *exec[] = {"./user", NULL};
 	pid_t child = 0;
 	FILE *fp;
@@ -149,7 +151,21 @@ int main (int argc, char **argv)
 		perror("clock get failed");
 		return 1;
 	}
-	
+	//Total resrouces key
+	resid = shmget(RES_KEY, sizeof(Resources), 0644 | IPC_CREAT);
+	if(resid == -1)
+	{
+		perror("resid get failed");
+		return 1;
+	}
+	//Place total resources in shared memory
+	totalResources = (Resources *) shmat(resid, NULL, 0);
+	if(totalResources ==(void *) -1)
+	{
+		perror("total resources get failed");
+		return 1;
+	}
+
 	//Message queue key
 	msgqid = msgget(MSG_KEY, 0644 | IPC_CREAT);
         if (msgqid == -1)
@@ -184,8 +200,19 @@ int main (int argc, char **argv)
         	return 0;
 	}
 
-	newProcTime();
+	availableResources = malloc(sizeof(Resources));
+	allocatedResources = malloc(sizeof(Resources));
+	printf("Available resources: ");
+	for(i = 0; i < 20; i++)
+	{
+		totalResources->usedResources[i] = (rand() % 9) + 1;
+		availableResources->usedResources[i] = totalResources->usedResources[i];
+		allocatedResources->usedResources[i] = 0;
+		printf("%d: %d, ", i, availableResources->usedResources[i]);
+	}
+	printf("\n");
 
+	newProcTime();
 	//Now we start the main show
 	while(1)
 	{
@@ -207,23 +234,30 @@ int main (int argc, char **argv)
 		if(msgrcv(msgqid, &message, sizeof(message), 2, IPC_NOWAIT) > 0)
 		{
 			printf("OSS acknowledges child %ld has died\n", (long) message.pid);
-//			message.mtype = 1;
-//                       message.mtext = 1;
-//                      msgsnd(msgqid, &message, sizeof(message), 0);
 			wait(NULL);	
 			counter--;
 			tot_proc++;
 		}
                 if(msgrcv(msgqid, &message, sizeof(message), 3, IPC_NOWAIT) > 0)
                 {
-                        printf("OSS acknowledges child %ld is asking for resources\n", (long) message.pid);
-                        message.mtype = message.pid;
-                        message.mtext = 1;
-                        msgsnd(msgqid, &message, sizeof(message), 0);
+                        printf("OSS acknowledges child %ld is asking for resource %d which has %d left\n", (long) message.pid, message.mtext, totalResources->usedResources[message.mtext]);
+                        if(availableResources->usedResources[message.mtext] > 1)
+			{
+				printf("Request granted to child %ld\n!", (long) message.pid);
+				availableResources->usedResources[message.mtext]--;
+				allocatedResources->usedResources[message.mtext]++;
+				message.mtype = message.pid;
+                        	message.mtext = 1;
+                        	msgsnd(msgqid, &message, sizeof(message), 0);
+			}
+			else
+				printf("Request denied child %ld!\n", (long) message.pid);
                 }
                 if(msgrcv(msgqid, &message, sizeof(message), 4, IPC_NOWAIT) > 0)
                 {
                         printf("OSS acknowledges child %ld is releasing resources\n", (long) message.pid);
+			availableResources->usedResources[message.mtext]++;
+			allocatedResources->usedResources[message.mtext]--;
                         message.mtype = message.pid;
                         message.mtext = 1;
                         msgsnd(msgqid, &message, sizeof(message), 0);
@@ -245,6 +279,8 @@ int main (int argc, char **argv)
 
 	shmdt(sim_clock);
 	shmctl(shmid, IPC_RMID, NULL);
+        shmdt(totalResources);
+        shmctl(resid, IPC_RMID, NULL);
 
         if (msgctl(msgqid, IPC_RMID, NULL) == -1)
                 fprintf(stderr, "Message queue could not be deleted\n");

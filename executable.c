@@ -12,13 +12,13 @@
 
 #define SEC_KEY 0x1234567
 #define MSG_KEY 0x2345
+#define RES_KEY 0x7654
 
-//Initialize the shared clock and message queue
+//Initialize the shared clock, total resource tracker, and message queue
 typedef struct Clock
 {
         unsigned int sec;
         unsigned int nsec;
-//	pid_t shmPID;
 } Clock;
 
 struct msgbuf
@@ -28,12 +28,17 @@ struct msgbuf
 	pid_t pid;
 } message;
 
+typedef struct Resources
+{
+        int usedResources[20];
+} Resources;
 
 int main()
 {
-	int shmid, msgqid, duration, decision, decision_flag = 0;
+	int i, shmid, msgqid, resid, duration, decision, decision_flag = 0, resChoice;
 	long long current_time = 0;
 	struct Clock *sim_clock;
+	struct Resources *totalResources, *allocatedRes;
 	time_t t;
 	pid_t pid;
 	
@@ -60,6 +65,25 @@ int main()
                 perror("clock get failed");
                 return 1;
         }
+
+	//Access shared resources totals
+	resid = shmget(RES_KEY, sizeof(Resources), 0644 | IPC_CREAT);
+        if(resid == -1)
+        {
+                perror("resid get failed");
+                return 1;
+        }  
+        totalResources = (Resources *) shmat(resid, NULL, 0);
+        if(totalResources == (void *)-1)
+        {
+                perror("total resources get failed");
+                return 1;
+        }
+
+	allocatedRes = malloc(sizeof(Resources));
+	for(i = 0; i < 20; i++)
+		allocatedRes->usedResources[i] = 0;
+
 	pid = getpid();	
 	//Seed the random number generator and grab a number between 0 and 50,000,000)
 	srand((int)time(&t) % getpid());	
@@ -70,6 +94,7 @@ int main()
 	{
 		if(!decision_flag)
 		{
+			resChoice = (rand() % 20);
 			decision = (rand() % 100);
 			duration = (rand() % 5000000);
 			current_time = sim_clock->sec*1000000000 + sim_clock->nsec;
@@ -77,29 +102,47 @@ int main()
 		}
 		if(decision < 2)
 		{
-			printf("Child dead %ld\n", (long) pid);
+			printf("Child dead %ld\nResources used ", (long) pid);
+			for(i = 0; i < 20; i++)
+				printf("%d: %d ", i, allocatedRes->usedResources[i]);
+			printf("\n");
 			message.mtype = 2;
 			message.pid = pid;
 			msgsnd(msgqid, &message, sizeof(message), 0);
 			exit(0);
 		}
-		if(decision > 2 && decision <= 50 && ((current_time + duration) <= (sim_clock->sec*1000000000 + sim_clock->nsec)))
+		if(decision > 2 && decision <= 55 && ((current_time + duration) <= (sim_clock->sec*1000000000 + sim_clock->nsec)))
 		{
-			printf("Child %ld is asking for resources!\n", (long) pid);
-               	        message.mtype = 3;
-               	        message.pid = pid;
-               	        msgsnd(msgqid, &message, sizeof(message), 0);
-			if(msgrcv(msgqid, &message, sizeof(message), pid, 0) > 0)
-				decision_flag = 0;
+			if(totalResources->usedResources[resChoice] != allocatedRes->usedResources[resChoice])
+			{
+				printf("Child %ld is requesting %d resource!\n", (long) pid, resChoice);
+				message.mtype = 3;
+               	        	message.pid = pid;
+				message.mtext = resChoice;
+               	        	msgsnd(msgqid, &message, sizeof(message), 0);
+				if(msgrcv(msgqid, &message, sizeof(message), pid, 0) > 0)
+				{
+					allocatedRes->usedResources[resChoice]++;
+					decision_flag = 0;
+				}
+			}
+			decision_flag = 0;
 		}
-               	if(decision > 50 && decision <= 100 && ((current_time + duration) <= (sim_clock->sec*1000000000 + sim_clock->nsec)))
-               	{
-               	        printf("Child %ld is releasing resources!\n", (long) pid);
-               	        message.mtype = 4;
-               	        message.pid = pid;
-               	        msgsnd(msgqid, &message, sizeof(message), 0);
-			if(msgrcv(msgqid, &message, sizeof(message), pid, 0) > 0)
-				decision_flag = 0;
+               	if(decision > 55 && decision <= 100 && ((current_time + duration) <= (sim_clock->sec*1000000000 + sim_clock->nsec)))
+               	{	if(allocatedRes->usedResources[resChoice] > 0)
+			{
+               	        	printf("Child %ld is releasing resources!\n", (long) pid);
+               	        	message.mtype = 4;
+               	        	message.pid = pid;
+				message.mtext = resChoice;
+               	        	msgsnd(msgqid, &message, sizeof(message), 0);
+				if(msgrcv(msgqid, &message, sizeof(message), pid, 0) > 0)
+				{
+					allocatedRes->usedResources[resChoice]--;
+					decision_flag = 0;
+				}
+			}
+			decision_flag = 0;
                	}	
 	}
 }

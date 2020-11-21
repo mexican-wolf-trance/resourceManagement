@@ -72,6 +72,7 @@ int shmid, msgqid, resid, semid;
 struct Clock *sim_clock;
 struct Clock *new_proc_clock;
 union semun u;
+FILE *fp;
 
 Resources *totalResources;
 Resources *availableResources;
@@ -106,11 +107,46 @@ void queuePush(Queue** head_ref, pid_t pid)
 
 void blockedPush(Queue** head_ref, PCB *pcb)
 {
+//        Queue* new_proc = malloc(sizeof(Queue));
+//	Queue* last = *head_ref;
+//        new_proc->head = malloc(sizeof(PCB));
+//        new_proc->head = pcb;
+//        new_proc->next = NULL;
+//	if(*head_ref == NULL)
+//	{
+//		*head_ref = new_proc;
+//		return;
+//	}
+//        while(last->next != NULL)
+//		last = last->next;
+//	last->next = new_proc;
+//	return;
         Queue* new_proc = malloc(sizeof(Queue));
-        new_proc->head = malloc(sizeof(PCB));
+//        new_proc->head = malloc(sizeof(PCB));
         new_proc->head = pcb;
         new_proc->next = (*head_ref);
         (*head_ref) = new_proc;
+
+}
+
+void deleteProc(Queue** ptr, pid_t pid)
+{
+	Queue *temp = *ptr, *prev;
+	while(temp != NULL && temp->head->pid == pid)
+	{
+		*ptr = temp->next;
+		free(temp);
+		return;
+	}
+	while(temp != NULL && temp->head->pid != pid)
+	{
+		prev = temp;
+		temp = temp->next;
+	}
+	if(temp == NULL)
+		return;
+	prev->next = temp->next;
+	free(temp);
 }
 	
 PCB *findProc(Queue *ptr, pid_t pid)
@@ -146,6 +182,7 @@ int checkProcTime()
 //The signal handler! Couldn't figure out how to close the file stream before getting signal though
 void sigint(int sig)
 {
+	fclose(fp);
         printf("\nChildren still in process list: ");
         while(processList != NULL)
 	{
@@ -189,10 +226,11 @@ int main (int argc, char **argv)
 	signal(SIGINT, sigint);
 	signal(SIGSEGV, sigint);
 
-	int i, option, max_child = 18, max_time = 10, counter = 0, tot_proc = 0, vOpt = 0, resCheck;
+	fp = fopen("log.out", "w");
+
+	int i, option, max_child = 18, max_time = 30, counter = 0, tot_proc = 0, vOpt = 0, resCheck;
 	char *exec[] = {"./user", NULL};
 	pid_t child = 0;
-	FILE *fp;
 	//Getopt is great!
         while ((option = getopt(argc, argv, "hv")) != -1)
         switch (option)
@@ -267,11 +305,6 @@ int main (int argc, char **argv)
 	signal(SIGALRM, sigint);
 
 	//Open the log file
-	if ((fp = fopen("log.out", "w")) == 0)
-	{
-		perror("log.out");
-		sigint(0);
-        }
 
 	//Start the clock!
 	sim_clock->sec = 0;
@@ -331,16 +364,16 @@ int main (int argc, char **argv)
                         }
                         counter++;
 			tot_proc++;
-//			printf("Adding new process %ld\n", (long) child);
+			printf("Adding new process %ld\n", (long) child);
 			queuePush(&processList, child);
-//			Queue *printPtr = processList;
-//		        printf("\nChildren still in process list: ");
-//			while(printPtr != NULL)
- //       		{
-  //     			        printf("%ld, ", (long) printPtr->head->pid);
-   //     		        printPtr = printPtr->next;
-    //   			}
-     //   		printf("\n");
+			Queue *printPtr = processList;
+		        printf("\nChildren still in process list: ");
+			while(printPtr != NULL)
+	       		{
+ 			        printf("%ld, ", (long) printPtr->head->pid);
+	     		        printPtr = printPtr->next;
+ 			}
+	   		printf("\n");
 		
 		}
                 if(semop(semid, &v, 1) < 0)
@@ -352,6 +385,8 @@ int main (int argc, char **argv)
 		if(msgrcv(msgqid, &message, sizeof(message), 2, IPC_NOWAIT) > 0)
 		{
 			printf("OSS acknowledges child %ld has died\n", (long) message.pid);
+			if(vOpt)
+				fprintf(fp, "OSS acknowledges child %ld has died\n", (long) message.pid);
 			wait(NULL);	
 			counter--;
 			//printf("Total processes so far: %d\n", tot_proc);
@@ -362,41 +397,46 @@ int main (int argc, char **argv)
 				availableResources->usedResources[i] += resCheck;
 				allocatedResources->usedResources[i] -= resCheck;
 			}
-			        printf("Available resources: ");
-		        for(i = 0; i < 20; i++)
-		        {
+//			        printf("Available resources: ");
+//		        for(i = 0; i < 20; i++)
+//		        {
 //		                totalResources->usedResources[i] = (rand() % 9) + 1;
 //		                availableResources->usedResources[i] = totalResources->usedResources[i];
 //		                allocatedResources->usedResources[i] = 0;
-	        	        printf("%d: %d ", i, availableResources->usedResources[i]);
-        		}
-        		printf("\n");
-			Queue *delPtr = processList;				
-			while(delPtr != NULL)
-			{
-				if(delPtr->head->pid == message.pid)
-				{
-					delPtr = delPtr->next;
-					break;
-				}
-				if(delPtr->next->head->pid == message.pid)
-				{
-					delPtr->next = delPtr->next->next;
-					break;
-				}
-				delPtr = delPtr->next;
-			}
+//	        	        printf("%d: %d ", i, availableResources->usedResources[i]);
+ //       		}
+//        		printf("\n");
+			printf("Deleting from process list\n");
+			deleteProc(&processList, message.pid);
+//			Queue *delPtr = processList;				
+//			while(delPtr != NULL)
+//			{
+//				if(delPtr->head->pid == message.pid)
+//				{
+//					delPtr = delPtr->next;
+//					break;
+//				}
+//				if(delPtr->next->head->pid == message.pid)
+//				{
+//					delPtr->next = delPtr->next->next;
+//					break;
+//				}
+//				delPtr = delPtr->next;
+//			}
 		}
 		
                 if(msgrcv(msgqid, &message, sizeof(message), 3, IPC_NOWAIT) > 0)
                 {
-                        printf("OSS acknowledges child %ld is asking for resource %d which has %d left\n", (long) message.pid, message.mresReq, availableResources->usedResources[message.mresReq]);
+                        printf("OSS acknowledges child %ld is asking for %d of resource %d which has %d left at time %u seconds %u nanoseconds\n", (long) message.pid, message.mresNo, message.mresReq, availableResources->usedResources[message.mresReq], sim_clock->sec, sim_clock->nsec);
+			if(vOpt)
+				fprintf(fp, "OSS acknowledges child %ld is asking %d for resource %d which has %d left at time %u seconds %u nanoseconds\n", (long) message.pid, message.mresNo, message.mresReq, availableResources->usedResources[message.mresReq], sim_clock->sec, sim_clock->nsec);
                         if(availableResources->usedResources[message.mresReq] > message.mresNo)
 			{
 				printf("Request granted to child %ld\n!", (long) message.pid);
+				if(vOpt)
+					fprintf(fp, "Request granted to child %ld\n!", (long) message.pid);
 				availableResources->usedResources[message.mresReq] -= message.mresNo;
 				allocatedResources->usedResources[message.mresReq] += message.mresNo;
-				printf("Req granted, now allocating...\n");
 				PCB *ptr = findProc(processList, message.pid);
 				if(ptr == NULL)
 				{
@@ -416,67 +456,86 @@ int main (int argc, char **argv)
 				newBlockProc->blockedBurstTime = sim_clock->sec*1000000000 + sim_clock->nsec;
 				newBlockProc->resReq = message.mresReq;
 				newBlockProc->used->usedResources[message.mresReq] += message.mresNo;
+				printf("Add child %ld to the blocked queue\n", newBlockProc->pid);
 				blockedPush(&blockedQueue, newBlockProc);
+				Queue *optr = blockedQueue;
+			        while(optr != NULL)
+			        {
+			                printf("%ld, ", (long) optr->head->pid);
+			                optr = optr->next;
+			        }
+			        printf("\n");
 				printf("Request denied! Child %ld is now blocked!\n", (long) message.pid);
-	                        Queue *delPtr2 = processList;
-	                        while(delPtr2 != NULL)
-	                        {
-	                                if(delPtr2->head->pid == message.pid)
-	                                {
-	                                        delPtr2 = delPtr2->next;
-	                                        break;
-	                                }
-	                                if(delPtr2->next->head->pid == message.pid)
-	                                {
-	                                        delPtr2->next = delPtr2->next->next;
-	                                        break;
-	                                }
-	                                delPtr2 = delPtr2->next;
-	                        }
+				fprintf(fp, "Request denied! Child %ld is now blocked!\n", (long) message.pid);
+//	                        Queue *delPtr2 = processList;
+	                        deleteProc(&processList, message.pid);
+			        printf("\nChildren still in process list: ");
+				Queue *printer = processList;
+			        while(printer != NULL)
+			        {
+			                printf("%ld, ", (long) printer->head->pid);
+			                printer = printer->next;
+			        }
+			        printf("\n");
+//	                        {
+//	                                if(delPtr2->head->pid == message.pid)
+//	                                {
+//	                                        delPtr2 = delPtr2->next;
+//	                                        break;
+//	                                }
+//	                                if(delPtr2->next->head->pid == message.pid)
+//	                                {
+//	                                        delPtr2->next = delPtr2->next->next;
+//	                                        break;
+//	                                }
+//	                                delPtr2 = delPtr2->next;
+//	                        }
 			}
                 }
 		
                 if(msgrcv(msgqid, &message, sizeof(message), 4, IPC_NOWAIT) > 0)
                 {
-                        printf("OSS acknowledges child %ld is releasing resource %d\n", (long) message.pid, message.mresReq);
-			availableResources->usedResources[message.mresReq] += message.mresNo;
+                	availableResources->usedResources[message.mresReq] += message.mresNo;
 			allocatedResources->usedResources[message.mresReq] -= message.mresNo;
+			findProc(processList, message.pid)->used->usedResources[message.mresReq] = 0;
+
+                        printf("OSS acknowledges child %ld is releasing resource %d which now has %d\n", (long) message.pid, message.mresReq, availableResources->usedResources[message.mresReq]);
+                        if(vOpt)
+				fprintf(fp, "OSS acknowledges child %ld is releasing resource %d which now has %d\n", (long) message.pid, message.mresReq, availableResources->usedResources[message.mresReq]);
+
 			
                         message.mtype = message.pid;
                         message.mresReq = 1;
                         msgsnd(msgqid, &message, sizeof(message), 0);
                 }
-		previous = blockedQueue;
-		while(previous != NULL)
+		
+		while(blockedQueue != NULL)
 		{
-			resCheck = previous->head->resReq;
-			if(availableResources->usedResources[resCheck] < totalResources->usedResources[resCheck])
+			resCheck = blockedQueue ->head->resReq;
+			if(availableResources->usedResources[resCheck] > blockedQueue->head->used->usedResources[resCheck])
 			{	
-				printf("Child %ld is unblocked! Resource %d granted!\n", (long) previous->head->pid, resCheck);
-				previous->head->totalBlockedTime += previous->head->blockedBurstTime;
-				previous->head->blockedBurstTime = (sim_clock->sec*1000000000 + sim_clock->nsec) - previous->head->blockedBurstTime;
+				printf("Child %ld is unblocked! Resource %d granted!\n", (long) blockedQueue->head->pid, resCheck);
+				fprintf(fp, "Child %ld is unblocked! Resource %d granted!\n", (long) blockedQueue->head->pid, resCheck);
+				previous->head->totalBlockedTime += blockedQueue->head->blockedBurstTime;
+				printf("Add blocked burst time\n");
+				blockedQueue->head->blockedBurstTime = (sim_clock->sec*1000000000 + sim_clock->nsec) - blockedQueue->head->blockedBurstTime;
+				printf("Add total burst time\n");
 //				previous->head->used->usedResources[resCheck]++;
-				blockedPush(&processList, previous->head);
-				allocatedResources->usedResources[resCheck]++;
-				availableResources->usedResources[resCheck]--;
+				blockedPush(&processList, blockedQueue->head);
+				printf("blocked push\n");
+				allocatedResources->usedResources[resCheck] += blockedQueue->head->used->usedResources[resCheck];
+				availableResources->usedResources[resCheck] -= blockedQueue->head->used->usedResources[resCheck];
+				printf("changing resource values\n");
 
-				message.mtype = previous->head->pid;
+				message.mtype = blockedQueue->head->pid;
 				message.mresReq = 1;
 				msgsnd(msgqid, &message, sizeof(message), 0);
-				if(previous->next)
-				{
-					previous = previous->next;
-					break;
-				}
-				else
-				{
-					previous = NULL;
-				}
+				printf("messaage sent\n");
+
+				deleteProc(&blockedQueue, blockedQueue->head->pid);
+				break;
 			}
-
-			previous = previous->next;
-//			current = current->next;
-
+			blockedQueue = blockedQueue->next;
 		}
                 if(semop(semid, &p, 1) < 0)
 		{
@@ -495,7 +554,7 @@ int main (int argc, char **argv)
 			sigint(0);
 		}
 
-		if(tot_proc == 40)
+		if(tot_proc == 30)
 			break;
 //		printf("Chrildren still in process list: ");
 //		while(processList != NULL)
@@ -506,6 +565,24 @@ int main (int argc, char **argv)
 //		while(wait(NULL) > 0);
 
 	printf("Main finished!\n");
+	fclose(fp);
+
+        printf("\nChildren still in process list: ");
+        while(processList != NULL)
+        {
+                printf("%ld, ", (long) processList->head->pid);
+                processList = processList->next;
+        }
+        printf("\n");
+
+        printf("\nChildren still in blocked queue: ");
+        while(blockedQueue != NULL)
+        {
+                printf("%ld, ", (long) blockedQueue->head->pid);
+                blockedQueue = blockedQueue->next;
+        }
+        printf("\n");
+
 
 	shmdt(sim_clock);
 	shmctl(shmid, IPC_RMID, NULL);

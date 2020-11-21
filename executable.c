@@ -131,7 +131,7 @@ int main()
 		{
 			resChoice = (rand() % 20);
 			decision = (rand() % 100);
-			duration = (rand() % 2500000);
+			duration = (rand() % 25000);
 			current_time = sim_clock->sec*1000000000 + sim_clock->nsec;
 			if(current_time > 1000000000)
 				dead_flag = 1;
@@ -142,12 +142,9 @@ int main()
                     	perror("semop v"); 
 			exit(EXIT_FAILURE);
 		}
-		if(dead_flag && decision < 2)
+		if(dead_flag && decision < 2 && ((current_time + duration) <= time_check))
 		{
-			printf("Child dead %ld\nResources used ", (long) pid);
-			for(i = 0; i < 20; i++)
-				printf("%d: %d ", i, allocatedRes->usedResources[i]);
-			printf("\n");
+			printf("Child %ld decision %d\n", (long) pid, decision);
 			message.mtype = 2;
 			message.pid = pid;
 			msgsnd(msgqid, &message, sizeof(message), 0);
@@ -159,16 +156,13 @@ int main()
 			{
 				if(requested[resChoice] != allocatedRes->usedResources[resChoice] && requested[resChoice] > 0)
 				{
-					res_no = (rand() % requested[i]) + 1;
+					res_no = ((rand() % requested[resChoice]) + 1) - allocatedRes->usedResources[resChoice];
 					printf("Child %ld is requesting %d resource!\n", (long) pid, resChoice);
 					message.mtype = 3;
                	        		message.pid = pid;
 					message.mresReq = resChoice;
 					message.mresNo = res_no;
-               	        		if((msgsnd(msgqid, &message, sizeof(message), 0) < 0))
-					{
-						perror("Message send failed\n");
-					}
+               	        		msgsnd(msgqid, &message, sizeof(message), 0);
 					if(msgrcv(msgqid, &message, sizeof(message), pid, 0) > 0)
 					{
 						allocatedRes->usedResources[resChoice] += res_no;
@@ -186,15 +180,10 @@ int main()
                	{
 			while(1)
 			{
-				if(requested[resChoice] == 0)
-				{
-					decision_flag = 0;
-					break;
-				}	
 				i = 0;
 				while(i < 20)
 				{
-					if((i == resChoice) && (allocatedRes->usedResources[resChoice] > 0))
+					if((i == resChoice))
 					{
                	        			printf("Child %ld is releasing resource %d!\n", (long) pid, resChoice);
                	        			message.mtype = 4;
@@ -204,7 +193,7 @@ int main()
                	        			msgsnd(msgqid, &message, sizeof(message), 0);
 						if(msgrcv(msgqid, &message, sizeof(message), pid, 0) > 0)
 						{
-							allocatedRes->usedResources[resChoice] -= 1;
+							allocatedRes->usedResources[resChoice] = 0;
 							decision_flag = 0;
 							break;
 						}
@@ -215,7 +204,8 @@ int main()
 				if(!decision_flag)
 					break;
 			}
-               	}	
+               	}
+		decision_flag = 0;	
 	}
 }
 
